@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/build-magisk.yml"
       - "patches/AFRd2-AV1-Patches.tar.gz"
+      - "patches/03-layer-recheck-720p-test.patch"
       - "packaging/**"
       - "README.md"
 
@@ -43,7 +44,7 @@ jobs:
           git -C upstream checkout "$UPSTREAM_SHA"
           test "$(git -C upstream rev-parse HEAD)" = "$UPSTREAM_SHA"
 
-      - name: Apply Resolution Match and AV1 LayerFast patches
+      - name: Apply Resolution Match, AV1 LayerFast, and post-switch layer patch
         run: |
           tar -xzf patches/AFRd2-AV1-Patches.tar.gz -C "$RUNNER_TEMP"
           cd upstream
@@ -51,6 +52,8 @@ jobs:
           patch --batch --forward -p1 < "$RUNNER_TEMP/patch_bundle/01-resolution-match.patch"
           patch --dry-run --batch --forward -p1 < "$RUNNER_TEMP/patch_bundle/02-av1-layer-fast.patch"
           patch --batch --forward -p1 < "$RUNNER_TEMP/patch_bundle/02-av1-layer-fast.patch"
+          patch --dry-run --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/03-layer-recheck-720p-test.patch"
+          patch --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/03-layer-recheck-720p-test.patch"
 
       - name: Host syntax check and tests
         working-directory: upstream

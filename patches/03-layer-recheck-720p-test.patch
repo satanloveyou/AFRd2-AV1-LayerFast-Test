@@ -1,0 +1,60 @@
+diff --git a/afrd.c b/afrd.c
+index 13a3f94..30cbb72 100644
+--- a/afrd.c
++++ b/afrd.c
+@@ -3396,6 +3396,17 @@ static int atv14_layer_content_hz (int expect_hz, bool allow_transition,
+ 		return 0;
+ 	}
+ 
++	/* Частоту не просили (она уже закреплена): проба нужна только для проверки перехода.
++	 * Переход проверен выше по половинам окна; повторная классификация слоя не нужна.
++	 * После смены режима слой синхронизируется с дисплеем, поэтому FPS-классификатор
++	 * закономерно отвергает совпадающий период и создает ложную запись в журнале. */
++	if (!want_rate)
++	{
++		trace (2, "слой: p=%.2f a=%.2f n=%d gap=%d — перехода нет (половины "
++		       "%.2f/%.2f мс)\n", p, a, n, (int) gap, hh.md1_ms, hh.md2_ms);
++		return 0;
++	}
++
+ 	int hz = 0;
+ 	if (!fps_layer_rate_hz (n, a, p, (int) gap, &hz))
+ 	{
+@@ -3405,15 +3416,6 @@ static int atv14_layer_content_hz (int expect_hz, bool allow_transition,
+ 		return 0;
+ 	}
+ 
+-	/* Частоту не просили (она уже закреплена) — проба нужна была только для
+-	 * проверки перехода, и он не обнаружен. */
+-	if (!want_rate)
+-	{
+-		trace (2, "слой: p=%.2f a=%.2f n=%d gap=%d — перехода нет (половины "
+-		       "%.2f/%.2f мс)\n", p, a, n, (int) gap, hh.md1_ms, hh.md2_ms);
+-		return 0;
+-	}
+-
+ 	/* Различить 24 и 25 можно только на высокой частоте дисплея: при 50 Гц
+ 	 * 24 к/с тоже ложится по 40 мс (2 периода) и неотличим от 25. */
+ 	if (p >= 18.0)
+diff --git a/tests/test_vdec.c b/tests/test_vdec.c
+index 6f3cef3..06dc1a2 100644
+--- a/tests/test_vdec.c
++++ b/tests/test_vdec.c
+@@ -195,6 +195,17 @@ int main (void)
+ 	assert (vdec_probe_active ("tests/fixtures/vdec_status_idle.txt", &active) == 0);
+ 	assert (!active);
+ 
++	/* Геометрия 720p должна извлекаться из vdec_status так же, как 1080p/4K. */
++	{
++		vdec_chan_t one [VDEC_MAX_CHANNELS];
++		assert (vdec_parse_channels ("  device name : ammvdec_h264_v4\n"
++		                             "  frame width : 1280\n"
++		                             "  frame height : 720\n"
++		                             "  frame count : 7\n",
++		                             one, VDEC_MAX_CHANNELS) == 1);
++		assert (one [0].width == 1280 && one [0].height == 720);
++	}
++
+ 	printf ("vdec: OK\n");
+ 	return 0;
+ }
