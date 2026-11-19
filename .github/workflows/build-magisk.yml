@@ -1,0 +1,99 @@
+name: Build Magisk 24.3 module
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-magisk.yml"
+      - "patches/AFRd2-AV1-Patches.tar.gz"
+      - "packaging/**"
+      - "README.md"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout build recipe
+        uses: actions/checkout@v4
+
+      - name: Fetch pinned AFRd2 source
+        env:
+          UPSTREAM_SHA: edcd8ab48be83dc4d22ac248d08f2bf314095206
+        run: |
+          git clone https://github.com/ReyterAK/afrd2.git upstream
+          git -C upstream checkout "$UPSTREAM_SHA"
+          test "$(git -C upstream rev-parse HEAD)" = "$UPSTREAM_SHA"
+
+      - name: Apply Resolution Match and AV1 LayerFast patches
+        run: |
+          tar -xzf patches/AFRd2-AV1-Patches.tar.gz -C "$RUNNER_TEMP"
+          cd upstream
+          patch --dry-run --batch --forward -p1 < "$RUNNER_TEMP/patch_bundle/01-resolution-match.patch"
+          patch --batch --forward -p1 < "$RUNNER_TEMP/patch_bundle/01-resolution-match.patch"
+          patch --dry-run --batch --forward -p1 < "$RUNNER_TEMP/patch_bundle/02-av1-layer-fast.patch"
+          patch --batch --forward -p1 < "$RUNNER_TEMP/patch_bundle/02-av1-layer-fast.patch"
+
+      - name: Host syntax check and tests
+        working-directory: upstream
+        run: |
+          gcc -std=gnu11 -fsyntax-only -Wall -Icfg_parse afrd.c
+          sh tests/run_tests.sh
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK and build tools
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager --install "ndk;26.3.11579264" "build-tools;35.0.0" "platforms;android-35"
+
+      - name: Build ARMv7 daemon
+        working-directory: upstream
+        run: |
+          export NDK="$ANDROID_HOME/ndk/26.3.11579264"
+          export AFRD_ABIS=armeabi-v7a
+          test -x "$NDK/ndk-build"
+          ./mka
+          test -x libs/armeabi-v7a/afrd
+
+      - name: Build Android 11 SystemControl helper and Magisk payload
+        working-directory: upstream
+        run: |
+          D8="$ANDROID_HOME/build-tools/35.0.0/d8" \
+          LIB="$ANDROID_HOME/platforms/android-35/android.jar" \
+            sh tools/droidlogic/build-dex.sh
+          test -s tools/droidlogic/afrd-disp.dex
+          sh install/magisk/build-module.sh armeabi-v7a
+          test -s out/magisk/afrd
+          test -s out/magisk/afrd.ini
+          test -s out/magisk/afrd-disp.dex
+          test -s out/magisk/afrd-disp.sh
+
+      - name: Package Magisk 24.3 ZIP
+        working-directory: upstream
+        run: |
+          STAGE="$RUNNER_TEMP/afrd2-magisk-package"
+          mkdir -p "$STAGE/META-INF/com/google/android"
+          cp -a out/magisk/. "$STAGE/"
+          cp "$GITHUB_WORKSPACE/packaging/customize.sh" "$STAGE/customize.sh"
+          cp "$GITHUB_WORKSPACE/packaging/update-binary" "$STAGE/META-INF/com/google/android/update-binary"
+          cp "$GITHUB_WORKSPACE/packaging/updater-script" "$STAGE/META-INF/com/google/android/updater-script"
+          chmod 0755 "$STAGE/afrd" "$STAGE/afrd-disp.sh" "$STAGE/service.sh" "$STAGE/uninstall.sh" "$STAGE/customize.sh" "$STAGE/META-INF/com/google/android/update-binary"
+          (cd "$STAGE" && zip -qr "$GITHUB_WORKSPACE/AFRd2-AV1-LayerFast-Test-Magisk-24.3.zip" .)
+          unzip -t "$GITHUB_WORKSPACE/AFRd2-AV1-LayerFast-Test-Magisk-24.3.zip"
+          file "$STAGE/afrd"
+          readelf -h "$STAGE/afrd" | grep -E "Class:|Machine:"
+          grep -E "^(id|version|versionCode)=" "$STAGE/module.prop"
+          sha256sum "$GITHUB_WORKSPACE/AFRd2-AV1-LayerFast-Test-Magisk-24.3.zip"
+
+      - name: Upload installable Magisk ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AFRd2-AV1-LayerFast-Test-Magisk-24.3
+          path: AFRd2-AV1-LayerFast-Test-Magisk-24.3.zip
+          if-no-files-found: error
+          retention-days: 30

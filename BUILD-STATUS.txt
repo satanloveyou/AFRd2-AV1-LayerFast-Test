@@ -1,11 +1,9 @@
 # Build status
 
-Source prepared and host-tested. Android ARMv7 binary has not been compiled.
+- Source baseline: `ReyterAK/afrd2` commit `edcd8ab48be83dc4d22ac248d08f2bf314095206`.
+- Patches: Resolution Match followed by AV1 LayerFast.
+- Local validation: host C syntax check and the full `tests/run_tests.sh` suite passed after applying both patches to the exact source archive.
+- Android ARMv7 output: produced by the GitHub Actions workflow with Android NDK r26d. The workflow artifact is the installable Magisk 24.3 ZIP.
+- Device acceptance: still required on the Tanix W2 Ultra.
 
-The prior build environment did not have Android NDK r26d or ndk-build. Use the provided build wrapper with NDK r26d to produce the installable Magisk ZIP.
-
-Validated checks previously reported:
-- gcc -std=gnu11 -fsyntax-only -Wall -Icfg_parse afrd.c
-- sh tests/run_tests.sh
-
-This repository is a test-source documentation drop at present; the complete source archive and unified patch are not yet uploaded.
+Do not install the source archive or patch bundle. Install only the generated `AFRd2-AV1-LayerFast-Test-Magisk-24.3.zip`.

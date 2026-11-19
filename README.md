@@ -1,56 +1,36 @@
-# AFRd2 - experimental 4K AV1 fast-switch test
+# AFRd2 - AV1 LayerFast test build
 
-## Change
+Private experiment for the Tanix W2 Ultra (Amlogic S905W2, Android 11, ARMv7 userspace, Magisk 24.3).
 
-This test adds an early first-switch path only for 4K AV1 playback on the Amlogic vendor-mode backend (the ATV11 path used by the Tanix W2 Ultra).
+The build is based on public AFRd2 upstream commit `edcd8ab48be83dc4d22ac248d08f2bf314095206`, then applies the Resolution Match patch and the experimental SurfaceFlinger AV1 fast-path patch from `patches/AFRd2-AV1-Patches.tar.gz`.
 
-- It does **not** trust AV1 `frame rate` or `frame dur` fields from `vdec_status`.
-- It reads the actual SurfaceFlinger present-time history before changing HDMI mode.
-- It requires at least 100 usable intervals, no outliers, a classifiable average cadence, and no detected change of cadence between the two halves of the history buffer.
-- If the layer history is absent, too short, noisy, or mixed, the new path does nothing and the existing envelope measurement remains responsible for mode selection.
-- The existing post-switch envelope verification and correction remain enabled.
-- Other codecs and the existing Resolution Match geometry selection are unchanged.
+## What the test changes
 
-The AV1 fast path polls at intervals of 800 ms. SurfaceFlinger normally retains up to 128 present-time entries, so the first decision is expected only after enough new frames have filled the history buffer. For 29.97 fps this is roughly 3.4 seconds of frame history; this is a design estimate, not a measured guarantee. On 23.976 fps the history can take a little over 4 seconds to fill.
+- For 4K AV1 on the ATV11 vendor-mode path, the initial FPS decision may use SurfaceFlinger present-time intervals instead of the unreliable AV1 decoder `frame dur` value.
+- It requires at least 100 usable intervals, zero outliers, a classifiable cadence, and no detected cadence transition between the two halves of the sample.
+- If the layer sample is missing or ambiguous, the original envelope measurement remains in charge.
+- Post-switch verification and correction remain enabled.
+- Resolution Match remains enabled.
 
-## Profile included
+The fast path polls every 800 ms. The expected first decision around 3.4 seconds for 29.97 fps is an estimate, not a measured guarantee.
 
-- `mode.prefer.exact=1`
-- `mode.use.fract=1`
-- `fps.measure.envelope.ms=10000`
-- `fps.measure.envelope.early.ms=8000`
-- `fps.measure.envelope.max.ms=15000`
-- `fps.measure.envelope.sub.ms=2500`
-- `fps.measure.envelope.skip.ms=1000`
-- `fps.correct.enable=1`
-- `fps.correct.av1=off`
+## Build
 
-## Build ARMv7 Magisk ZIP
+GitHub Actions builds the ARMv7 Magisk package with Android NDK r26d. Run the **Build Magisk 24.3 module** workflow manually.
 
-Requires Android NDK r26d:
+The workflow checks out the pinned upstream revision, applies both patches, runs host checks, builds the ARMv7 daemon and SystemControl DEX helper, packages a Magisk 24.3-compatible ZIP, and uploads it as a workflow artifact.
 
-```sh
-AFRD_ABIS=armeabi-v7a ./mka
-sh install/magisk/build-module.sh armeabi-v7a
-```
+## Device installation
 
-Or run `./build-av1-layer-fast.sh`. Output ZIP: `out/AFRd2-AV1-LayerFast-Test-Magisk-24.3.zip`. Build only; it does not install on a device.
+Download the artifact named `AFRd2-AV1-LayerFast-Test-Magisk-24.3`. In Magisk 24.3 choose **Modules -> Install from storage**, select the ZIP and reboot. The module ID remains `afrd2`, so it upgrades the existing AFRd2 module. Keep the rollback ZIP available.
 
-## Validation
+## Acceptance test
 
-Host validation was reported as passing:
-- `gcc -std=gnu11 -fsyntax-only -Wall -Icfg_parse afrd.c`
-- `sh tests/run_tests.sh`
+Play a 4K AV1 29.97 fps video in SmartTube and inspect `/data/local/afrd.log`:
 
-Android ARMv7 binary is not included. NDK r26d was unavailable in the prior build environment.
+- look for `быстрое AV1-решение по слою` before the normal envelope decision;
+- verify 3840x2160 geometry and `2160p30hz`;
+- confirm the actual display rate is 29.97 Hz;
+- stop playback and confirm the original desktop mode is restored.
 
-## Device acceptance test
-
-1. Play a 4K AV1 29.97 fps clip in SmartTube.
-2. Capture `/data/local/afrd.log` from the first `видео ведёт` line.
-3. Confirm `быстрое AV1-решение по слою` appears before the normal 8-second envelope decision.
-4. Confirm 3840x2160 geometry and `2160p30hz`.
-5. Confirm actual display frequency is 29.97 Hz and envelope does not correct to another rate.
-6. Stop playback and confirm desktop mode is restored.
-
-If the early layer classification is rejected, the old envelope path remains responsible. Do not loosen the 100-interval, zero-outlier, or two-half transition checks just to force a fast switch.
+Host tests do not replace testing on the Tanix W2 Ultra.
