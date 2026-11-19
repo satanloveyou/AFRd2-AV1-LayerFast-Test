@@ -1,0 +1,48 @@
+diff --git a/afrd.c b/afrd.c
+index 0000000..0000000 100644
+--- a/afrd.c
++++ b/afrd.c
+@@ -1647,6 +1647,7 @@ static int atv14_layer_content_hz (int expect_hz, bool allow_transition,
+                                    bool *transition, bool want_rate)
+ {
++	static int last_missing_stats_expect_ms = -1;
+ 	double p = 0, a = 0, md = 0, p9 = 0, gap = 0;
+ 	int n = 0;
+ 	layer_halves_t hh;
+@@ -1653,7 +1654,10 @@ static int atv14_layer_content_hz (int expect_hz, bool allow_transition,
+ 	if (!atv14_layer_stats (&p, &a, &md, &p9, &gap, &n, expect_ms, 200, &hh))
+ 	{
+-		trace (2, "слой: статистика не получена (expect %d мс)\n", expect_ms);
++		/* Не повторяем одинаковую диагностику каждые 10 с.
++		 * При проверке перехода (want_rate=false) она не полезна. */
++		if (want_rate && (expect_ms != last_missing_stats_expect_ms))
++			trace (2, "слой: статистика не получена (expect %d мс)\n", expect_ms);
++		last_missing_stats_expect_ms = expect_ms;
+ 		return 0;
+ 	}
++	last_missing_stats_expect_ms = -1;
+@@
+ static int atv14_select_mode (int hz, int w, int h, int floor)
+ {
++	static int last_fallback_hz = -1;
++	static int last_fallback_w = -1;
++	static int last_fallback_h = -1;
++	static int last_fallback_id = -1;
+ 	sf_choice_t ch;
+@@
+-		trace (1, "режима для " HZ_FMT " Гц нет — беру самый быстрый "
+-		       HZ_FMT " Гц\n", HZ_ARGS (hz),
+-		       HZ_ARGS (sfmodes_current_hz (g_sf_modes, g_sf_modes_n, id)));
++		if ((hz != last_fallback_hz) || (w != last_fallback_w) ||
++		    (h != last_fallback_h) || (id != last_fallback_id))
++		{
++			trace (1, "режима для " HZ_FMT " Гц нет — беру самый быстрый "
++			       HZ_FMT " Гц\n", HZ_ARGS (hz),
++			       HZ_ARGS (sfmodes_current_hz (g_sf_modes, g_sf_modes_n, id)));
++			last_fallback_hz = hz;
++			last_fallback_w = w;
++			last_fallback_h = h;
++			last_fallback_id = id;
++		}
+ 		return id;
+ 	}
