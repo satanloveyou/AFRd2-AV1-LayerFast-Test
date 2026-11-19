@@ -20,6 +20,21 @@ jobs:
       - name: Checkout build recipe
         uses: actions/checkout@v4
 
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
+      - name: Install Android NDK and build tools
+        run: |
+          sdkmanager --install "ndk;26.3.11579264" "build-tools;35.0.0" "platforms;android-35"
+
       - name: Fetch pinned AFRd2 source
         env:
           UPSTREAM_SHA: edcd8ab48be83dc4d22ac248d08f2bf314095206
@@ -42,14 +57,6 @@ jobs:
         run: |
           gcc -std=gnu11 -fsyntax-only -Wall -Icfg_parse afrd.c
           sh tests/run_tests.sh
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android NDK and build tools
-        run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager --install "ndk;26.3.11579264" "build-tools;35.0.0" "platforms;android-35"
 
       - name: Build ARMv7 daemon
         working-directory: upstream
