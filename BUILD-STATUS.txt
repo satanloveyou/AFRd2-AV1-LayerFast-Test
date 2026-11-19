@@ -1,0 +1,11 @@
+# Build status
+
+Source prepared and host-tested. Android ARMv7 binary has not been compiled.
+
+The prior build environment did not have Android NDK r26d or ndk-build. Use the provided build wrapper with NDK r26d to produce the installable Magisk ZIP.
+
+Validated checks previously reported:
+- gcc -std=gnu11 -fsyntax-only -Wall -Icfg_parse afrd.c
+- sh tests/run_tests.sh
+
+This repository is a test-source documentation drop at present; the complete source archive and unified patch are not yet uploaded.
