@@ -1,48 +1,135 @@
 diff --git a/afrd.c b/afrd.c
-index 0000000..0000000 100644
+index 30cbb72..0be69f2 100644
 --- a/afrd.c
 +++ b/afrd.c
-@@ -1647,6 +1647,7 @@ static int atv14_layer_content_hz (int expect_hz, bool allow_transition,
+@@ -1948,6 +1948,40 @@ static int atv14_multiple_mode (int hz, int w, int h, int floor, int *mult)
+ 	return best;
+ }
+ 
++/* Дедупликация сообщения о fallback-режиме. Сам выбор режима не меняется:
++ * запоминаются только параметры уже принятого решения, чтобы не печатать
++ * одну и ту же строку на каждом цикле проверки видео. */
++static bool g_fallback_log_valid;
++static int g_fallback_log_source, g_fallback_log_hz;
++static int g_fallback_log_w, g_fallback_log_h, g_fallback_log_id;
++static int g_fallback_log_mode_hz;
++
++static void mode_fallback_log_reset (void)
++{
++	g_fallback_log_valid = false;
++}
++
++static void mode_fallback_log_once (int source, int hz, int w, int h,
++                                    int id, int mode_hz)
++{
++	if (g_fallback_log_valid &&
++	    (source == g_fallback_log_source) &&
++	    (hz == g_fallback_log_hz) && (w == g_fallback_log_w) &&
++	    (h == g_fallback_log_h) && (id == g_fallback_log_id) &&
++	    (mode_hz == g_fallback_log_mode_hz))
++		return;
++
++	trace (1, "режима для " HZ_FMT " Гц нет — беру самый быстрый "
++	       HZ_FMT " Гц\n", HZ_ARGS (hz), HZ_ARGS (mode_hz));
++	g_fallback_log_source = source;
++	g_fallback_log_hz = hz;
++	g_fallback_log_w = w;
++	g_fallback_log_h = h;
++	g_fallback_log_id = id;
++	g_fallback_log_mode_hz = mode_hz;
++	g_fallback_log_valid = true;
++}
++
+ /* Выбор режима под частоту контента: кратные частоты (mode.prefer.exact) и
+  * чёрный список частот (mode.blacklist.rates) — правила legacy-ветки.
+  * floor (mode.min.hz.list, 24.8) — минимальная частота режима для текущего
+@@ -1989,12 +2023,12 @@ static int atv14_select_mode (int hz, int w, int h, int floor)
+ 		if (id < 0)
+ 			return -1;
+ 
+-		trace (1, "режима для " HZ_FMT " Гц нет — беру самый быстрый "
+-		       HZ_FMT " Гц\n", HZ_ARGS (hz),
+-		       HZ_ARGS (sfmodes_current_hz (g_sf_modes, g_sf_modes_n, id)));
++		mode_fallback_log_once (0, hz, w, h, id,
++		                        sfmodes_current_hz (g_sf_modes, g_sf_modes_n, id));
+ 		return id;
+ 	}
+ 
++	mode_fallback_log_reset ();
+ 	if (ch.rate_n > 1)
+ 		trace (1, "режим " HZ_FMT " Гц выбран как кратный (x%d) для " HZ_FMT " Гц\n",
+ 		       HZ_ARGS (ch.hz), ch.rate_n, HZ_ARGS (hz));
+@@ -2060,6 +2094,9 @@ static int atv_current_target (const platform_t *plat, int *w, int *h)
+ static void atv_video_geometry (const platform_t *plat, unsigned src_w,
+                                 unsigned src_h, int *out_w, int *out_h)
+ {
++	static bool last_logged;
++	static unsigned last_src_w, last_src_h;
++	static int last_out_w, last_out_h;
+ 	if (!out_w || !out_h || plat->sink != SINK_VENDOR_MODE ||
+ 	    !src_w || !src_h || g_modes_n <= 0)
+ 		return;
+@@ -2069,8 +2106,17 @@ static void atv_video_geometry (const platform_t *plat, unsigned src_w,
+ 	{
+ 		*out_w = w;
+ 		*out_h = h;
+-		trace (1, "разрешение контента %ux%u — выбираю HDMI-геометрию %dx%d\n",
+-		       src_w, src_h, *out_w, *out_h);
++		if (!last_logged || (src_w != last_src_w) || (src_h != last_src_h) ||
++		    (w != last_out_w) || (h != last_out_h))
++		{
++			trace (1, "разрешение контента %ux%u — выбираю HDMI-геометрию %dx%d\n",
++			       src_w, src_h, *out_w, *out_h);
++			last_src_w = src_w;
++			last_src_h = src_h;
++			last_out_w = w;
++			last_out_h = h;
++			last_logged = true;
++		}
+ 	}
+ }
+ 
+@@ -2126,13 +2172,17 @@ static int mode_resolve (const platform_t *plat, int hz, int w, int h, int floor
+ 		 * допуском 4.3 % уводила 24p на 50 Гц. */
+ 		int fastest = bump_target_mode (plat, w, h);
+ 		if ((fastest < 0) || (floor && (atv14_mode_hz (plat, fastest) < floor)))
++		{
++			mode_fallback_log_reset ();
+ 			return -1;
++		}
+ 
+-		trace (1, "режима для " HZ_FMT " Гц нет — беру самый быстрый "
+-		       HZ_FMT " Гц\n", HZ_ARGS (hz), HZ_ARGS (atv14_mode_hz (plat, fastest)));
++		mode_fallback_log_once (1, hz, w, h, fastest,
++		                        atv14_mode_hz (plat, fastest));
+ 		return fastest;
+ 	}
+ 
++	mode_fallback_log_reset ();
+ 	/* Идентификатор для решений цикла — индекс в списке (см. atv_current_target) */
+ 	int idx = -1;
+ 	for (int j = 0; j < g_modes_n; j++)
+@@ -3362,6 +3412,7 @@ static int atv14_layer_fast_fps_hz (int *samples_out, double *period_out,
+ static int atv14_layer_content_hz (int expect_hz, bool allow_transition,
                                     bool *transition, bool want_rate)
  {
 +	static int last_missing_stats_expect_ms = -1;
  	double p = 0, a = 0, md = 0, p9 = 0, gap = 0;
  	int n = 0;
  	layer_halves_t hh;
-@@ -1653,7 +1654,10 @@ static int atv14_layer_content_hz (int expect_hz, bool allow_transition,
+@@ -3372,9 +3423,14 @@ static int atv14_layer_content_hz (int expect_hz, bool allow_transition,
+ 
  	if (!atv14_layer_stats (&p, &a, &md, &p9, &gap, &n, expect_ms, 200, &hh))
  	{
 -		trace (2, "слой: статистика не получена (expect %d мс)\n", expect_ms);
-+		/* Не повторяем одинаковую диагностику каждые 10 с.
-+		 * При проверке перехода (want_rate=false) она не полезна. */
 +		if (want_rate && (expect_ms != last_missing_stats_expect_ms))
++		{
 +			trace (2, "слой: статистика не получена (expect %d мс)\n", expect_ms);
-+		last_missing_stats_expect_ms = expect_ms;
++			last_missing_stats_expect_ms = expect_ms;
++		}
  		return 0;
  	}
 +	last_missing_stats_expect_ms = -1;
-@@
- static int atv14_select_mode (int hz, int w, int h, int floor)
- {
-+	static int last_fallback_hz = -1;
-+	static int last_fallback_w = -1;
-+	static int last_fallback_h = -1;
-+	static int last_fallback_id = -1;
- 	sf_choice_t ch;
-@@
--		trace (1, "режима для " HZ_FMT " Гц нет — беру самый быстрый "
--		       HZ_FMT " Гц\n", HZ_ARGS (hz),
--		       HZ_ARGS (sfmodes_current_hz (g_sf_modes, g_sf_modes_n, id)));
-+		if ((hz != last_fallback_hz) || (w != last_fallback_w) ||
-+		    (h != last_fallback_h) || (id != last_fallback_id))
-+		{
-+			trace (1, "режима для " HZ_FMT " Гц нет — беру самый быстрый "
-+			       HZ_FMT " Гц\n", HZ_ARGS (hz),
-+			       HZ_ARGS (sfmodes_current_hz (g_sf_modes, g_sf_modes_n, id)));
-+			last_fallback_hz = hz;
-+			last_fallback_w = w;
-+			last_fallback_h = h;
-+			last_fallback_id = id;
-+		}
- 		return id;
- 	}
+ 
+ 	/* Наша смена режима меняет период подачи на глазах — половины разойдутся
+ 	 * и без смены контента; такие случаи отсекает span буфера. */
