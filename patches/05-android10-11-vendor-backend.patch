@@ -47,7 +47,7 @@ diff --git a/platform.c b/platform.c
 +		               HDMI_STATE_OLD_CABLE;
 +		/* Не вызывать probe 1035 на SDK 29/30: это не AFR backdoor. */
 +		p.sf_backdoor = android10_11 ? false : sf_backdoor_available ();
-@@ -102,3 +122,12 @@
+@@ -102,4 +122,13 @@
  		p.vendor_cli = (access (CS_CLI, X_OK) == 0) ? CS_CLI : NULL;
  		p.vendor_mode_cli = cfg_get_str ("vendor.disp.cli", DEFAULT_VENDOR_DISP_CLI);
  		p.disp_cap = cfg_get_str ("vendor.disp.cap", DEFAULT_VENDOR_DISP_CAP);
@@ -61,9 +61,15 @@ diff --git a/platform.c b/platform.c
 +				trace (0, "Android SDK %d: SystemControl/помощник недоступен\n", sdk);
 +		}
 +
- 		/* Android 10/11 (Amlogic): транзакция 1035 там означает другую
- 		 * операцию, и на сборке 11 вызов с одним int роняет SurfaceFlinger
- 		 * (проверено живьём). Но режим переключается вендорным SystemControl
-@@ -112,1 +140,1 @@
+-		/* Android 10/11 (Amlogic): транзакция 1035 там означает другую
+-		 * операцию, и на сборке 11 вызов с одним int роняет SurfaceFlinger
+-		 * (проверено живьём). Но режим переключается вендорным SystemControl
+-		 * HIDL — им пользуется штатный системный AFR (журнал §33.18). Идём
+-		 * этим путём только если вендорный сервис и помощник на месте; иначе
+-		 * остаётся прежний пассивный режим с предупреждением. */
++		/* На SDK 29/30 SystemControl уже выбран выше, пробу SurfaceFlinger 1035
++		 * не вызываем: на Android 10/11 эта транзакция имеет другую семантику.
++		 * Для остальных версий SystemControl остаётся резервным backend. */
+@@ -112,1 +143,1 @@
 -		if (!p.sf_backdoor &&
 +		if (!android10_11 && !p.sf_backdoor &&
