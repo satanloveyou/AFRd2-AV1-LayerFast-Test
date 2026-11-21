@@ -8,7 +8,7 @@ diff --git a/platform.c b/platform.c
  #include "afrd.h"
  #include "colorspace.h"
  #include "exec.h"
-@@ -28,4 +29,17 @@
+@@ -31,4 +32,17 @@
  #define ACTIVITY_DUMP_CMD "dumpsys activity activities | grep -m1 ResumedActivity"
  
 +/* Android 10/11 (SDK 29/30) на Amlogic переключают режим через SystemControl.
@@ -32,7 +32,7 @@ diff --git a/platform.c b/platform.c
 +	bool android10_11 = (sdk == 29) || (sdk == 30);
 +
 +	if (have_vdec && (android10_11 || !have_old_hdmi))
-@@ -88,4 +104,8 @@
+@@ -88,4 +104,9 @@
 -		p.kind = PLAT_ATV14;
 -		p.sink = SINK_SF_BACKDOOR;
 -		p.hdmi_state = HDMI_STATE_NEW;
@@ -47,7 +47,8 @@ diff --git a/platform.c b/platform.c
 +		               HDMI_STATE_OLD_CABLE;
 +		/* Не вызывать probe 1035 на SDK 29/30: это не AFR backdoor. */
 +		p.sf_backdoor = android10_11 ? false : sf_backdoor_available ();
-@@ -102,2 +122,10 @@
+@@ -102,3 +122,12 @@
+ 		p.vendor_cli = (access (CS_CLI, X_OK) == 0) ? CS_CLI : NULL;
  		p.vendor_mode_cli = cfg_get_str ("vendor.disp.cli", DEFAULT_VENDOR_DISP_CLI);
  		p.disp_cap = cfg_get_str ("vendor.disp.cap", DEFAULT_VENDOR_DISP_CAP);
  
@@ -63,8 +64,6 @@ diff --git a/platform.c b/platform.c
  		/* Android 10/11 (Amlogic): транзакция 1035 там означает другую
  		 * операцию, и на сборке 11 вызов с одним int роняет SurfaceFlinger
  		 * (проверено живьём). Но режим переключается вендорным SystemControl
-@@ -112,7 +140,7 @@
+@@ -112,1 +140,1 @@
 -		if (!p.sf_backdoor &&
 +		if (!android10_11 && !p.sf_backdoor &&
- 		    (sysfs_exists (VENDOR_SYSTEMCONTROL) == 0) &&
- 		    p.vendor_mode_cli && (sysfs_exists (p.vendor_mode_cli) == 0))
