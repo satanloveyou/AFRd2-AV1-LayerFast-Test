@@ -8,6 +8,7 @@ on:
       - "patches/AFRd2-AV1-Patches.tar.gz"
       - "patches/03-layer-recheck-720p-test.patch"
       - "patches/04-log-suppression.patch"
+      - "patches/05-android10-11-vendor-backend.patch"
       - "packaging/**"
       - "README.md"
 
@@ -45,7 +46,7 @@ jobs:
           git -C upstream checkout "$UPSTREAM_SHA"
           test "$(git -C upstream rev-parse HEAD)" = "$UPSTREAM_SHA"
 
-      - name: Apply Resolution Match, AV1 LayerFast, post-switch layer, and log suppression patches
+      - name: Apply Resolution Match, AV1 LayerFast, and Android 10/11 backend patches
         run: |
           tar -xzf patches/AFRd2-AV1-Patches.tar.gz -C "$RUNNER_TEMP"
           cd upstream
@@ -57,6 +58,8 @@ jobs:
           patch --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/03-layer-recheck-720p-test.patch"
           patch --dry-run --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/04-log-suppression.patch"
           patch --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/04-log-suppression.patch"
+          patch --dry-run --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/05-android10-11-vendor-backend.patch"
+          patch --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/05-android10-11-vendor-backend.patch"
 
       - name: Host syntax check and tests
         working-directory: upstream

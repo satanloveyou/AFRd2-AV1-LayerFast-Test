@@ -1,0 +1,79 @@
+diff --git a/platform.c b/platform.c
+--- a/platform.c
++++ b/platform.c
+@@ -6,6 +6,7 @@
+ #include <unistd.h>
+ #include <string.h>
++#include <stdlib.h>
+ #include "afrd.h"
+ #include "colorspace.h"
+ #include "exec.h"
+@@ -41,6 +42,18 @@
+ #define ACTIVITY_DUMP_CMD "dumpsys activity activities | grep -m1 ResumedActivity"
+ 
++/* Android 10/11 (SDK 29/30) на Amlogic переключают режим через SystemControl.
++ * Проба SurfaceFlinger 1035 на этих версиях может дать ложноположительный
++ * ответ: транзакция существует, но имеет другую семантику и не является AFR
++ * backdoor. Поэтому выбор backend делаем по SDK, а не по результату этой
++ * пробы. Если getprop недоступен, сохраняем прежнее автоопределение. */
++static int android_sdk_version (void)
++{
++	char sdk [32] = { 0 };
++	if (exec_capture ("getprop ro.build.version.sdk", sdk, sizeof (sdk)) != 0)
++		return 0;
++	return atoi (sdk);
++}
++
+ static bool sf_backdoor_available (void)
+ {
+ 	/* Проба: вызов с заведомо неверным id. Если backdoor есть — получим
+@@ -83,8 +96,10 @@
+ 	bool have_old_hdmi = (sysfs_exists (HDMI_STATE_OLD) == 0) ||
+ 	                     (sysfs_exists (HDMI_STATE_OLD_CABLE) == 0);
+ 
+-	if (have_vdec && !have_old_hdmi)
++	int sdk = android_sdk_version ();
++	bool android10_11 = (sdk == 29) || (sdk == 30);
++
++	if (have_vdec && (android10_11 || !have_old_hdmi))
+ 	{
+-		p.kind = PLAT_ATV14;
+-		p.sink = SINK_SF_BACKDOOR;
+-		p.hdmi_state = HDMI_STATE_NEW;
+-		p.sf_backdoor = sf_backdoor_available ();
++		p.kind = android10_11 ? PLAT_ATV11 : PLAT_ATV14;
++		p.sink = android10_11 ? SINK_VENDOR_MODE : SINK_SF_BACKDOOR;
++		/* На Android 10/11 может существовать и старый switch/hdmi узел.
++		 * Выбираем реально присутствующий источник HPD, иначе демон видит
++		 * постоянно отключённый HDMI и очищает список режимов. */
++		p.hdmi_state = (sysfs_exists (HDMI_STATE_NEW) == 0) ? HDMI_STATE_NEW :
++		               (sysfs_exists (HDMI_STATE_OLD) == 0) ? HDMI_STATE_OLD :
++		               HDMI_STATE_OLD_CABLE;
++		/* Не вызывать probe 1035 на SDK 29/30: это не AFR backdoor. */
++		p.sf_backdoor = android10_11 ? false : sf_backdoor_available ();
+ 		/* Вендорский клиент нужен и для цветового пространства, и для чтения
+ 		 * HDR/SDR-атрибутов (hdrinfo). */
+ 		p.vendor_cli = (access (CS_CLI, X_OK) == 0) ? CS_CLI : NULL;
+ 		p.vendor_mode_cli = cfg_get_str ("vendor.disp.cli", DEFAULT_VENDOR_DISP_CLI);
+ 		p.disp_cap = cfg_get_str ("vendor.disp.cap", DEFAULT_VENDOR_DISP_CAP);
++
++		if (android10_11)
++		{
++			if ((sysfs_exists (VENDOR_SYSTEMCONTROL) != 0) ||
++			    !p.vendor_mode_cli || (sysfs_exists (p.vendor_mode_cli) != 0))
++				trace (0, "Android SDK %d: SystemControl или помощник не найден — "
++				          "безопасное переключение режима недоступно\n", sdk);
++			else
++				trace (1, "Android SDK %d: использую SystemControl HAL; "
++				          "SurfaceFlinger 1035 не используется\n", sdk);
++		}
+ 
+ 		/* Android 10/11 (Amlogic): транзакция 1035 означает другую
+@@ -96,7 +121,7 @@
+ 		 * путь только если вендорный сервис и помощник на месте; иначе
+ 		 * остаётся прежний пассивный режим с предупреждением. */
+-		if (!p.sf_backdoor &&
++		if (!android10_11 && !p.sf_backdoor &&
+ 		    (sysfs_exists (VENDOR_SYSTEMCONTROL) == 0) &&
+ 		    p.vendor_mode_cli && (sysfs_exists (p.vendor_mode_cli) == 0))
+ 		{
