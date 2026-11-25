@@ -1,9 +1,10 @@
 # Build status
 
 - Source baseline: `ReyterAK/afrd2` commit `edcd8ab48be83dc4d22ac248d08f2bf314095206`.
-- Patches: Resolution Match, AV1 LayerFast, then `03-layer-recheck-720p-test.patch` (post-switch layer guard and 720p decoder-dimension regression test).
+- Patches: Resolution Match, AV1 LayerFast, then `03-layer-recheck-720p-test.patch`, `04-log-suppression.patch`, `05-android10-11-vendor-backend.patch`, and `06-counter-reset-and-24-25-guard.patch`.
 - Local validation: host C syntax check, patch dry-run/apply, and non-JVM test suite passed against the pinned source plus the first two patches. GitHub Actions runs the complete test suite with JDK 17.
 - Android ARMv7 output: produced by the GitHub Actions workflow with Android NDK r26d. The workflow artifact is the installable Magisk 24.3 ZIP.
+- Patch 06 adds a host-tested decoder-signature comparison, preserves a confirmed layer-rate pin across a same-stream frame-counter reset, and prevents unconfirmed 23-27 fps measurements from following a 24/25 Hz display feedback loop.
 - Device acceptance: still required on the Tanix W2 Ultra.
 
 Do not install the source archive or patch bundle. Install only the generated `AFRd2-AV1-LayerFast-Test-Magisk-24.3.zip`.

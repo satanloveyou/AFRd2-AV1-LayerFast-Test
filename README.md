@@ -2,7 +2,7 @@
 
 Private experiment for the Tanix W2 Ultra (Amlogic S905W2, Android 11, ARMv7 userspace, Magisk 24.3).
 
-The build is based on public AFRd2 upstream commit `edcd8ab48be83dc4d22ac248d08f2bf314095206`, then applies the Resolution Match and experimental SurfaceFlinger AV1 fast-path patches from `patches/AFRd2-AV1-Patches.tar.gz`, followed by `patches/03-layer-recheck-720p-test.patch`.
+The build is based on public AFRd2 upstream commit `edcd8ab48be83dc4d22ac248d08f2bf314095206`, then applies the Resolution Match and experimental SurfaceFlinger AV1 fast-path patches from `patches/AFRd2-AV1-Patches.tar.gz`, followed by patches 03-06, including the decoder-reset retention and 24/25 Hz feedback guard.
 
 ## What the test changes
 
@@ -13,6 +13,8 @@ The build is based on public AFRd2 upstream commit `edcd8ab48be83dc4d22ac248d08f
 - Resolution Match remains enabled.
 - Decoder width/height select the smallest supported progressive HDMI geometry; the 720p decoder-dimension path has an explicit regression test.
 - After the refresh rate is pinned, layer sampling checks cadence transitions without redundantly classifying a layer already synchronized to the display.
+- A decoder frame-counter reset does not discard a previously confirmed layer-rate pin when the decoder signature remains the same.
+- When a 23-27 fps estimate merely follows the current 24/25 Hz display and has no independent confirmation from a player hint or decoder declaration, AFRd2 holds the current mode instead of oscillating between 24 and 25 Hz.
 
 The fast path polls every 800 ms. The expected first decision around 3.4 seconds for 29.97 fps is an estimate, not a measured guarantee.
 
@@ -20,7 +22,7 @@ The fast path polls every 800 ms. The expected first decision around 3.4 seconds
 
 GitHub Actions builds the ARMv7 Magisk package with Android NDK r26d. Run the **Build Magisk 24.3 module** workflow manually.
 
-The workflow checks out the pinned upstream revision, applies all three patches, runs host checks, builds the ARMv7 daemon and SystemControl DEX helper, packages a Magisk 24.3-compatible ZIP, and uploads it as a workflow artifact.
+The workflow checks out the pinned upstream revision, applies the patch bundle and patches 03-06, runs host checks, builds the ARMv7 daemon and SystemControl DEX helper, packages a Magisk 24.3-compatible ZIP, and uploads it as a workflow artifact.
 
 ## Device installation
 
