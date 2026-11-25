@@ -1,7 +1,7 @@
 diff --git a/vdec.h b/vdec.h
 --- a/vdec.h
 +++ b/vdec.h
-@@ -85,6 +85,11 @@ int vdec_read (const char *path, vdec_status_t *out, vdec_sel_t *st);
+@@ -85,7 +85,12 @@ int vdec_read (const char *path, vdec_status_t *out, vdec_sel_t *st);
  /* Быстрая проверка «есть ли хоть один канал» без изменения состояния выбора
   * (нужна для подтверждения старта/стопа в дебаунсе). */
  int vdec_probe_active (const char *path, bool *active);
@@ -17,7 +17,7 @@ diff --git a/vdec.h b/vdec.h
 diff --git a/vdec.c b/vdec.c
 --- a/vdec.c
 +++ b/vdec.c
-@@ -220,6 +220,18 @@ int vdec_read (const char *path, vdec_status_t *out, vdec_sel_t *st)
+@@ -220,6 +220,14 @@ int vdec_read (const char *path, vdec_status_t *out, vdec_sel_t *st)
  	return 0;
  }
  
@@ -35,7 +35,7 @@ diff --git a/vdec.c b/vdec.c
 diff --git a/tests/test_vdec.c b/tests/test_vdec.c
 --- a/tests/test_vdec.c
 +++ b/tests/test_vdec.c
-@@ -151,6 +151,28 @@ int main (void)
+@@ -151,5 +151,31 @@ int main (void)
  	assert (st.decl_fps == 30);		/* заявленная частота выбранного канала */
  
 +	/* Смена счётчика/status сама по себе не означает новый поток.
@@ -79,7 +79,7 @@ diff --git a/afrd.c b/afrd.c
 +	bool have_prev_vdec_signature = false;
  	vdec_sel_t vdec_sel = { 0 };
  	int retries = 0;
-@@ -4931,6 +4933,18 @@ static int run_atv14 (const platform_t *plat)
+@@ -4931,4 +4933,16 @@ static int run_atv14 (const platform_t *plat)
  		}
  		vdec_fails = 0;
  
@@ -96,7 +96,7 @@ diff --git a/afrd.c b/afrd.c
 +			have_prev_vdec_signature = false;
 +
  		bool new_video = v0.active;
-@@ -5052,6 +5066,24 @@ static int run_atv14 (const platform_t *plat)
+@@ -5052,22 +5066,34 @@ static int run_atv14 (const platform_t *plat)
  				bool own_reset = ceiling_take_restart (cur_sf_id) ||
  				                 ceiling_recent_within (8000000ULL) ||
  				                 own_switch_recent (cur_sf_id);
@@ -145,7 +145,7 @@ diff --git a/afrd.c b/afrd.c
  				{
  					seq_new_video (&seq);
  					/* Сверка источников относится к текущему видео: у нового
-@@ -5101,9 +5121,15 @@ static int run_atv14 (const platform_t *plat)
+@@ -5101,8 +5121,11 @@ static int run_atv14 (const platform_t *plat)
  				g_dec_last_id = -1;
  				g_dec_logged_hz = -1;
  				fb_double_logged = false;
@@ -160,7 +160,7 @@ diff --git a/afrd.c b/afrd.c
 +					layer_transitions = 0;
 +				}
  				counter_restart_log_us = 0;
-@@ -5133,7 +5159,7 @@ static int run_atv14 (const platform_t *plat)
+@@ -5133,8 +5159,8 @@ static int run_atv14 (const platform_t *plat)
  				 * перезапуск декодера после собственного переключения (2–9 с,
  				 * здесь бывало и 0.3 с) иначе отменял сверку, и «принял ли
  				 * ядро режим» не проверялось вовсе — ровно тот случай, ради
@@ -170,7 +170,7 @@ diff --git a/afrd.c b/afrd.c
  				{
  					hdrinfo_armed = false;
  					mstime_disable (&hdrinfo_timer);
-@@ -6419,6 +6445,29 @@ static int run_atv14 (const platform_t *plat)
+@@ -6419,6 +6445,37 @@ static int run_atv14 (const platform_t *plat)
  					hz = layer_rate_pin;
  				}
  
