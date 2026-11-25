@@ -145,11 +145,7 @@ diff --git a/afrd.c b/afrd.c
  				{
  					seq_new_video (&seq);
  					/* Сверка источников относится к текущему видео: у нового
-@@ -5101,8 +5121,11 @@ static int run_atv14 (const platform_t *plat)
- 				g_dec_last_id = -1;
- 				g_dec_logged_hz = -1;
- 				fb_double_logged = false;
- 				fract_logged = false;
+@@ -5230,4 +5230,7 @@ static int run_atv14 (const platform_t *plat)
 -				layer_rate_checked = false;
 -				layer_rate_pin = 0;
 -				layer_transitions = 0;
