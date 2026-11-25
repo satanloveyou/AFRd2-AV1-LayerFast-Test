@@ -1,5 +1,33 @@
-diff --git a/afrd.c b/afrd.c
-index 4b60704..226ed66 100644
+--- a/fps_class.h
++++ b/fps_class.h
+@@ -289,6 +289,10 @@
+                                 int declared_hz, bool api_hint,
+                                 bool layer_pinned);
+ 
++/* Свежесть последнего кадра SurfaceFlinger, время в наносекундах CLOCK_MONOTONIC. */
++bool fps_layer_present_recent (unsigned long long now_ns,
++                               unsigned long long present_ns,
++                               unsigned int max_age_ms);
+ 
+ int fps_rate_hz (int index);
+ const char *fps_rate_name (int index);
+--- a/fps_class.c
++++ b/fps_class.c
+@@ -689,3 +689,14 @@
+ 
+ 	return declared_hz;
+ }
++
++bool fps_layer_present_recent (unsigned long long now_ns,
++                               unsigned long long present_ns,
++                               unsigned int max_age_ms)
++{
++	if (!now_ns || !present_ns || !max_age_ms || (present_ns > now_ns))
++		return false;
++
++	return (now_ns - present_ns) <=
++	       (unsigned long long) max_age_ms * 1000000ULL;
++}
 --- a/afrd.c
 +++ b/afrd.c
 @@ -40,6 +40,7 @@
@@ -10,7 +38,8 @@ index 4b60704..226ed66 100644
  
  #ifndef SOCK_CLOEXEC
  #  define SOCK_CLOEXEC O_CLOEXEC
-@@ -3194,6 +3195,7 @@ typedef struct
+@@ -3194,7 +3195,8 @@
+ 
  static bool atv14_layer_stats (double *period_ms, double *avg_ms, double *median_ms,
                                 double *p90_ms, double *gap_pct, int *count,
 -                               int expect_ms, int ratio_pct, layer_halves_t *halves)
@@ -19,7 +48,7 @@ index 4b60704..226ed66 100644
  {
  	*period_ms = *avg_ms = 0.0;
  	if (median_ms)
-@@ -3211,6 +3213,8 @@ static bool atv14_layer_stats (double *period_ms, double *avg_ms, double *median
+@@ -3211,6 +3213,8 @@
  		halves->n1 = halves->n2 = 0;
  		halves->span_ms = 0.0;
  	}
@@ -28,19 +57,19 @@ index 4b60704..226ed66 100644
  
  	if (ratio_pct <= 0)
  		ratio_pct = 150;
-@@ -3246,8 +3250,8 @@ static bool atv14_layer_stats (double *period_ms, double *avg_ms, double *median
+@@ -3246,8 +3250,8 @@
  	          "k9=int(m*9/10); if (k9<1) k9=1; p9=r[k9]; "
  	          "for (i=1;i<=h;i++) r[i]=q[i]; md1=med(r,h); "
  	          "k=0; for (i=h+1;i<=m;i++) { k++; r[k]=q[i] } md2=med(r,k); "
--	          "printf \\\"%%.2f %%.2f %%.2f %%.2f %%d %%d %%.2f %%d %%.2f %%d %%.2f\\\", "
+-	          "printf \"%%.2f %%.2f %%.2f %%.2f %%d %%d %%.2f %%d %%.2f %%d %%.2f\", "
 -	          "p, s/m, md, p9, (lng*100)/m, m, md1, h, md2, k, span }'",
-+	          "printf \\\"%%.2f %%.2f %%.2f %%.2f %%d %%d %%.2f %%d %%.2f %%d %%.2f %%.0f\\\", "
++	          "printf \"%%.2f %%.2f %%.2f %%.2f %%d %%d %%.2f %%d %%.2f %%d %%.2f %%.0f\", "
 +	          "p, s/m, md, p9, (lng*100)/m, m, md1, h, md2, k, span, t[n] }'",
  	          (int) expect_ms, (int) ratio_pct);
  	/* Усечённая команда ломает awk молча: проба слоя просто «не получена»
  	 * (так и случилось, когда разбор вырос до половин — журнал §181).
-@@ -3264,8 +3268,10 @@ static bool atv14_layer_stats (double *period_ms, double *avg_ms, double *median
- 	
+@@ -3264,8 +3268,10 @@
+ 
  	double p = 0, a = 0, md = 0, p9 = 0, md1 = 0, md2 = 0, span = 0;
  	int gap = 0, n = 0, n1 = 0, n2 = 0;
 -	if ((sscanf (out, "%lf %lf %lf %lf %d %d %lf %d %lf %d %lf",
@@ -52,7 +81,7 @@ index 4b60704..226ed66 100644
  	    (a <= 0) || (md <= 0) || (p <= 0))
  		return false;
  
-@@ -3287,10 +3293,33 @@ static bool atv14_layer_stats (double *period_ms, double *avg_ms, double *median
+@@ -3287,10 +3293,34 @@
  		halves->n2 = n2;
  		halves->span_ms = span;
  	}
@@ -62,8 +91,9 @@ index 4b60704..226ed66 100644
  	return true;
  }
  
-+/* Проверяем время последнего present, а не заполненность кольцевого буфера:
-+ * после остановки видео SurfaceFlinger еще хранит старые строки latency. */
++/* Свежий timestamp отличает живую видеоподачу от старой истории latency:
++ * после паузы dumpsys всё ещё хранит прежние интервалы, но present timestamp
++ * последнего кадра уже не обновляется. */
 +static bool atv14_layer_present_active (unsigned int max_age_ms)
 +{
 +	double p = 0.0, a = 0.0;
@@ -86,7 +116,7 @@ index 4b60704..226ed66 100644
  /* Вердикт подачи видео-слоя: OK / неровная / вдвое реже. Разбор в
   * fps_class.h; порог доли — fps.feed.gap.pct (по умолчанию 10 %), порог
   * выброса — fps.feed.ratio.pct (по умолчанию 150 % от базы).
-@@ -3309,7 +3338,7 @@ static int atv14_cadence_verdict (int expect_ms, int *period_ms, int *median_ms,
+@@ -3309,7 +3339,7 @@
  	int ratio = cfg_get_int ("fps.feed.ratio.pct", 150);
  	int gap_thr = cfg_get_int ("fps.feed.gap.pct", 10);
  
@@ -95,7 +125,7 @@ index 4b60704..226ed66 100644
  		return FPS_CADENCE_OK;
  
  	*period_ms = (int) (p + 0.5);
-@@ -3331,7 +3360,7 @@ static int atv14_layer_fps_hz (void)
+@@ -3331,7 +3361,7 @@
  {
  	double p = 0, a = 0;
  	int n = 0;
@@ -104,7 +134,7 @@ index 4b60704..226ed66 100644
  		return 0;
  
  	if ((n < 60) || (a <= 0.0))
-@@ -3371,7 +3400,7 @@ static int atv14_layer_fast_fps_hz (int *samples_out, double *period_out,
+@@ -3371,7 +3401,7 @@
  	if (avg_out) *avg_out = 0.0;
  	if (gap_out) *gap_out = 0;
  
@@ -113,7 +143,7 @@ index 4b60704..226ed66 100644
  		return 0;
  
  	/* Не усредняем два разных ролика/каденции, которые ещё могут находиться
-@@ -3421,7 +3450,7 @@ static int atv14_layer_content_hz (int expect_hz, bool allow_transition,
+@@ -3421,7 +3451,7 @@
  	if (transition)
  		*transition = false;
  
@@ -122,54 +152,29 @@ index 4b60704..226ed66 100644
  	{
  		if (want_rate && (expect_ms != last_missing_stats_expect_ms))
  		{
-@@ -4378,6 +4407,11 @@ static int run_atv14 (const platform_t *plat)
+@@ -4378,6 +4408,10 @@
  	bool pause_logged = false;
  	/* когда в последний раз печатали «счётчик кадров стоит» (мкс) */
  	unsigned long long pause_log_us = 0;
-+	/* Временная потеря канала vdec не является стопом, пока SurfaceFlinger
-+	 * продолжает получать свежие кадры. Проверка ограничена по частоте. */
++	/* Декодер может кратко исчезать из vdec_status при продолжающейся подаче.
++	 * На время свежих кадров SurfaceFlinger не считаем это концом видео. */
 +	unsigned long long layer_stop_keep_until_us = 0;
-+	unsigned long long layer_probe_next_us = 0;
 +	unsigned long long layer_stop_log_us = 0;
  
  	/* Заморозка счётчика кадров (AV1 и т.п.): сколько живём без роста и
  	 * сообщили ли уже об этом (логируем один раз на видео) */
-@@ -5057,6 +5091,34 @@ static int run_atv14 (const platform_t *plat)
+@@ -5057,6 +5091,10 @@
  		vdec_fails = 0;
  
  		bool new_video = v0.active;
-+		bool layer_stop_grace = false;
++		bool layer_stop_grace = !new_video && video && held &&
++		                        (now_us () < layer_stop_keep_until_us);
 +		if (new_video)
-+		{
 +			layer_stop_keep_until_us = 0;
-+			layer_probe_next_us = 0;
-+		}
-+		else if (video && held)
-+		{
-+			unsigned long long now = now_us ();
-+			if (!layer_probe_next_us || (now >= layer_probe_next_us))
-+			{
-+				layer_probe_next_us = now + 750000ULL;
-+				if (atv14_layer_present_active (750))
-+				{
-+					layer_stop_keep_until_us = now + 1000000ULL;
-+					if (!layer_stop_log_us ||
-+					    ((now - layer_stop_log_us) >= 10000000ULL))
-+					{
-+						layer_stop_log_us = now;
-+						trace (1, "vdec_status временно потерял канал, но SurfaceFlinger "
-+						       "получает новые кадры — ложный стоп игнорирую\\n");
-+					}
-+				}
-+				else
-+					layer_stop_keep_until_us = 0;
-+			}
-+			layer_stop_grace = (now < layer_stop_keep_until_us);
-+		}
  
  		/* Провал декодера при смене ролика длится ~650 мс (замер §47.7), а
- 		/* смена режима — ~380 мс. Дебаунс старта (500 мс) съедал это окно,
-@@ -5065,7 +5127,8 @@ static int run_atv14 (const platform_t *plat)
+ 		 * смена режима — ~380 мс. Дебаунс старта (500 мс) съедал это окно,
+@@ -5065,7 +5103,8 @@
  		 * безопасно даже при ложном срабатывании — следующий замер вернёт
  		 * нужную частоту. Без этого смена ролика (в т.ч. автовоспроизведение)
  		 * наследовала низкий «потолок» предыдущего ролика. */
@@ -179,7 +184,7 @@ index 4b60704..226ed66 100644
  		    !ceiling_recent_within (CEILING_RESTART_WINDOW_US))
  			atv14_bump (plat, &orig_sf_id, &cur_sf_id, &want_sf_id, &held);
  
-@@ -5078,7 +5141,7 @@ static int run_atv14 (const platform_t *plat)
+@@ -5078,7 +5117,7 @@
  		bool lost_after_reset = !new_video &&
  		                        ceiling_recent_within (CEILING_RESTART_WINDOW_US);
  
@@ -188,7 +193,7 @@ index 4b60704..226ed66 100644
  		{
  			/* Остановку ждём с проверкой «видео вернулось»: на IPTV канал
  			 * открывается 5-10 с, и окно остановки бывает длинным (§92). */
-@@ -5089,9 +5152,26 @@ static int run_atv14 (const platform_t *plat)
+@@ -5089,10 +5128,27 @@
  
  			/* дебаунс не должен сдвигать состояние выбора канала (R61) */
  			bool again_active = false;
@@ -207,8 +212,8 @@ index 4b60704..226ed66 100644
 +				    ((now - layer_stop_log_us) >= 10000000ULL))
 +				{
 +					layer_stop_log_us = now;
-+					trace (1, "vdec_status временно потерял канал, но SurfaceFlinger "
-+					       "получает новые кадры — ложный стоп игнорирую\\n");
++					trace (1, "декодер временно не виден, но SurfaceFlinger "
++					       "продолжает получать кадры — ложный стоп игнорирую\n");
 +				}
 +			}
 +			else if ((active_rc == 0) && (again_active == new_video))
@@ -217,59 +222,20 @@ index 4b60704..226ed66 100644
 +				layer_stop_keep_until_us = 0;
  
  				/* Память о режиме, удержанном на паузе, относится к текущему
-diff --git a/fps_class.c b/fps_class.c
-index e80af8d..dc8a98f 100644
---- a/fps_class.c
-+++ b/fps_class.c
-@@ -689,3 +689,16 @@ int fps_fb_declared_hz (int measured_hz, int declared_hz)
- 
- 	return declared_hz;
- }
-+
-+/* Последний frame-present должен быть недавним: старые записи SurfaceFlinger
-+ * сохраняются в latency ring buffer и сами по себе не означают живое видео. */
-+bool fps_layer_present_recent (unsigned long long now_ns,
-+                               unsigned long long present_ns,
-+                               unsigned int max_age_ms)
-+{
-+	if (!now_ns || !present_ns || !max_age_ms || (present_ns > now_ns))
-+		return false;
-+
-+	return (now_ns - present_ns) <=
-+	       (unsigned long long) max_age_ms * 1000000ULL;
-+}
-diff --git a/fps_class.h b/fps_class.h
-index 26b691a..08e975c 100644
---- a/fps_class.h
-+++ b/fps_class.h
-@@ -300,4 +300,9 @@ int fps_rate_index_for_hz (int hz);
-  * 1.5..2.5 заявленной, возвращается заявленная; вне окна — измеренная. */
- int fps_fb_declared_hz (int measured_hz, int declared_hz);
- 
-+/* Свежесть последнего кадра SurfaceFlinger: timestamps в CLOCK_MONOTONIC, нс. */
-+bool fps_layer_present_recent (unsigned long long now_ns,
-+                               unsigned long long present_ns,
-+                               unsigned int max_age_ms);
-+
- #endif
-diff --git a/tests/run_tests.sh b/tests/run_tests.sh
-index be560b7..2eb8f6c 100755
+ 				 * видео: на новом видео (или после настоящего конца) она
 --- a/tests/run_tests.sh
 +++ b/tests/run_tests.sh
-@@ -11,6 +11,7 @@ run() { # run <test.c> <extra-sources...>
- 	./out/host-tests/$name || status=1
+@@ -12,6 +12,7 @@
  }
  run test_fps_class fps_class.c
-+run test_fps_layer_present_recent fps_class.c
  run test_fps_display_guard fps_class.c
++run test_fps_layer_present_recent fps_class.c
  run test_fps_env fps_env.c fps_class.c
  run test_sfmodes sfmodes.c
-diff --git a/tests/test_fps_layer_present_recent.c b/tests/test_fps_layer_present_recent.c
-new file mode 100644
-index 0000000..0fe9556
+ run test_dispmgr dispmgr.c
 --- /dev/null
 +++ b/tests/test_fps_layer_present_recent.c
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,20 @@
 +#include <assert.h>
 +#include <stdio.h>
 +#include "../fps_class.h"
@@ -280,6 +246,7 @@ index 0000000..0fe9556
 +
 +	assert (fps_layer_present_recent (now, now, 750));
 +	assert (fps_layer_present_recent (now, now - 750000000ULL, 750));
++	assert (fps_layer_present_recent (now, now - 749000000ULL, 750));
 +	assert (!fps_layer_present_recent (now, now - 751000000ULL, 750));
 +	assert (!fps_layer_present_recent (now, now + 1ULL, 750));
 +	assert (!fps_layer_present_recent (now, 0, 750));
