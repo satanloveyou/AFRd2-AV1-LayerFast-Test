@@ -1,6 +1,6 @@
 --- a/fps_class.h
 +++ b/fps_class.h
-@@ -280,6 +280,10 @@
+@@ -280,7 +280,12 @@
  /* Разные ли группы у двух частот (fps_rate_group): 23.976 и 24 — одна группа,
   * 24 и 30 — разные. Слева ноль означает «сравнивать нечего» -> false. */
  bool fps_group_differs (int a_hz, int b_hz);
@@ -15,7 +15,7 @@
  int fps_rate_index_for_hz (int hz);
 --- a/fps_class.c
 +++ b/fps_class.c
-@@ -664,2 +664,14 @@
+@@ -664,2 +664,13 @@
  	return declared_hz;
  }
 +
@@ -68,7 +68,7 @@
 +	             &latest_ns) != 12) ||
  	    (a <= 0) || (md <= 0) || (p <= 0))
  		return false;
-@@ -3209,9 +3214,11 @@
+@@ -3209,8 +3214,32 @@
  		halves->n2 = n2;
  		halves->span_ms = span;
  	}
@@ -118,7 +118,7 @@
 +	unsigned long long layer_stop_keep_until_us = 0;
 +	unsigned long long layer_stop_log_us = 0;
  
-@@ -4935,1 +4962,5 @@
+@@ -4935,2 +4962,6 @@
  		bool new_video = v0.active;
 +		bool layer_stop_grace = !new_video && video && held &&
 +		                        (now_us () < layer_stop_keep_until_us);
@@ -131,13 +131,13 @@
 +		    (plat->sink != SINK_LEGACY) && video &&
  		    !ceiling_recent_within (CEILING_RESTART_WINDOW_US))
  			atv14_bump (plat, &orig_sf_id, &cur_sf_id, &want_sf_id, &held);
-@@ -4952,3 +4984,3 @@
+@@ -4952,4 +4984,4 @@
  		bool lost_after_reset = !new_video &&
  		                        ceiling_recent_within (CEILING_RESTART_WINDOW_US);
  
 -		if ((new_video != video) && !lost_after_reset)
 +		if ((new_video != video) && !lost_after_reset && !layer_stop_grace)
-@@ -4966,8 +4998,26 @@
+@@ -4966,8 +4998,25 @@
  			/* дебаунс не должен сдвигать состояние выбора канала (R61) */
  			bool again_active = false;
 -			if (vdec_probe_active (plat->vdec_status, &again_active) == 0 &&
@@ -167,7 +167,7 @@
  				/* Память о режиме, удержанном на паузе, относится к текущему
 --- /dev/null
 +++ b/tests/test_fps_layer_present_recent.c
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,20 @@
 +#include <assert.h>
 +#include <stdio.h>
 +#include "../fps_class.h"
