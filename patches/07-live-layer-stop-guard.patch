@@ -1,9 +1,18 @@
 --- a/fps_class.h
 +++ b/fps_class.h
-@@ -280,7 +280,12 @@
+@@ -280,16 +280,21 @@
  /* Разные ли группы у двух частот (fps_rate_group): 23.976 и 24 — одна группа,
   * 24 и 30 — разные. Слева ноль означает «сравнивать нечего» -> false. */
  bool fps_group_differs (int a_hz, int b_hz);
+ 
+ /* Защита от обратной связи декодера с текущим режимом дисплея.
+  * Когда экран уже работает на 24/25 Гц, счётчик может повторять частоту
+  * экрана, а не контента. Без независимого подтверждения не переключаемся
+  * между 24 и 25: удерживаем текущий режим. */
+ int fps_guard_display_feedback (int measured_hz, int display_hz,
+                                 int declared_hz, bool api_hint,
+                                 bool layer_pinned);
+ 
  
 +/* Свежесть последнего кадра SurfaceFlinger, время в наносекундах CLOCK_MONOTONIC. */
 +bool fps_layer_present_recent (unsigned long long now_ns,
@@ -131,7 +140,7 @@
 +		    (plat->sink != SINK_LEGACY) && video &&
  		    !ceiling_recent_within (CEILING_RESTART_WINDOW_US))
  			atv14_bump (plat, &orig_sf_id, &cur_sf_id, &want_sf_id, &held);
-@@ -4952,4 +4984,4 @@
+@@ -5078,4 +5117,4 @@
  		bool lost_after_reset = !new_video &&
  		                        ceiling_recent_within (CEILING_RESTART_WINDOW_US);
  
@@ -190,10 +199,9 @@
 +}
 --- a/tests/run_tests.sh
 +++ b/tests/run_tests.sh
-@@ -9,6 +9,7 @@
- 	./out/host-tests/$name || status=1
- }
+@@ -12,5 +12,6 @@
  run test_fps_class fps_class.c
+ run test_fps_display_guard fps_class.c
 +run test_fps_layer_present_recent fps_class.c
  run test_fps_env fps_env.c fps_class.c
  run test_sfmodes sfmodes.c
