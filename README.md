@@ -2,7 +2,7 @@
 
 Private experiment for the Tanix W2 Ultra (Amlogic S905W2, Android 11, ARMv7 userspace, Magisk 24.3).
 
-The build is based on public AFRd2 upstream commit `edcd8ab48be83dc4d22ac248d08f2bf314095206`, then applies the Resolution Match and experimental SurfaceFlinger AV1 fast-path patches from `patches/AFRd2-AV1-Patches.tar.gz`, followed by patches 03-06, including the decoder-reset retention and 24/25 Hz feedback guard.
+The build is based on public AFRd2 upstream commit `edcd8ab48be83dc4d22ac248d08f2bf314095206`, then applies the Resolution Match and experimental SurfaceFlinger AV1 fast-path patches from `patches/AFRd2-AV1-Patches.tar.gz`, followed by patches 03-07, including the decoder-reset retention, 24/25 Hz feedback guard, and live-layer stop guard.
 
 ## What the test changes
 
@@ -15,6 +15,7 @@ The build is based on public AFRd2 upstream commit `edcd8ab48be83dc4d22ac248d08f
 - After the refresh rate is pinned, layer sampling checks cadence transitions without redundantly classifying a layer already synchronized to the display.
 - A decoder frame-counter reset does not discard a previously confirmed layer-rate pin when the decoder signature remains the same.
 - When a 23-27 fps estimate merely follows the current 24/25 Hz display and has no independent confirmation from a player hint or decoder declaration, AFRd2 holds the current mode instead of oscillating between 24 and 25 Hz.
+- If `vdec_status` briefly loses its active decoder block while SurfaceFlinger is still presenting fresh video frames, the stop transition is ignored; a stale last-present timestamp does not keep the mode held.
 
 The fast path polls every 800 ms. The expected first decision around 3.4 seconds for 29.97 fps is an estimate, not a measured guarantee.
 
@@ -22,7 +23,7 @@ The fast path polls every 800 ms. The expected first decision around 3.4 seconds
 
 GitHub Actions builds the ARMv7 Magisk package with Android NDK r26d. Run the **Build Magisk 24.3 module** workflow manually.
 
-The workflow checks out the pinned upstream revision, applies the patch bundle and patches 03-06, runs host checks, builds the ARMv7 daemon and SystemControl DEX helper, packages a Magisk 24.3-compatible ZIP, and uploads it as a workflow artifact.
+The workflow checks out the pinned upstream revision, applies the patch bundle and patches 03-07, runs host checks, builds the ARMv7 daemon and SystemControl DEX helper, packages a Magisk 24.3-compatible ZIP, and uploads it as a workflow artifact.
 
 ## Device installation
 
@@ -35,6 +36,7 @@ Play a 4K AV1 29.97 fps video in SmartTube and inspect `/data/local/afrd.log`:
 - look for `быстрое AV1-решение по слою` before the normal envelope decision;
 - verify 3840x2160 geometry and `2160p30hz`;
 - confirm the actual display rate is 29.97 Hz;
+- while a 25 fps VP9 video is still playing, confirm the mode does not jump back to 60 Hz during a temporary decoder-status gap;
 - stop playback and confirm the original desktop mode is restored.
 
 Host tests do not replace testing on the Tanix W2 Ultra.

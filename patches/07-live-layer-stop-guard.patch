@@ -1,0 +1,200 @@
+--- a/fps_class.h
++++ b/fps_class.h
+@@ -280,6 +280,10 @@
+ /* Разные ли группы у двух частот (fps_rate_group): 23.976 и 24 — одна группа,
+  * 24 и 30 — разные. Слева ноль означает «сравнивать нечего» -> false. */
+ bool fps_group_differs (int a_hz, int b_hz);
+ 
++/* Свежесть последнего кадра SurfaceFlinger, время в наносекундах CLOCK_MONOTONIC. */
++bool fps_layer_present_recent (unsigned long long now_ns,
++                               unsigned long long present_ns,
++                               unsigned int max_age_ms);
++
+ int fps_rate_hz (int index);
+ const char *fps_rate_name (int index);
+ int fps_rate_index_for_hz (int hz);
+--- a/fps_class.c
++++ b/fps_class.c
+@@ -664,2 +664,14 @@
+ 	return declared_hz;
+ }
++
++bool fps_layer_present_recent (unsigned long long now_ns,
++                               unsigned long long present_ns,
++                               unsigned int max_age_ms)
++{
++	if (!now_ns || !present_ns || !max_age_ms || (present_ns > now_ns))
++		return false;
++
++	return (now_ns - present_ns) <=
++	       (unsigned long long) max_age_ms * 1000000ULL;
++}
+--- a/afrd.c
++++ b/afrd.c
+@@ -34,6 +34,7 @@
+ #include <sys/socket.h>
+ #include <sys/stat.h>
+ #include <sys/utsname.h>
++#include <time.h>
+ 
+ #ifndef SOCK_CLOEXEC
+ #  define SOCK_CLOEXEC O_CLOEXEC
+@@ -3122,4 +3122,5 @@
+ static bool atv14_layer_stats (double *period_ms, double *avg_ms, double *median_ms,
+                                double *p90_ms, double *gap_pct, int *count,
+-                               int expect_ms, int ratio_pct, layer_halves_t *halves)
++                               int expect_ms, int ratio_pct, layer_halves_t *halves,
++                               unsigned long long *last_present_ns)
+ {
+@@ -3140,3 +3141,5 @@
+ 		halves->span_ms = 0.0;
+ 	}
++	if (last_present_ns)
++		*last_present_ns = 0;
+ 
+@@ -3183,2 +3186,2 @@
+-	          "printf \"%%.2f %%.2f %%.2f %%.2f %%d %%d %%.2f %%d %%.2f %%d %%.2f\", "
+-	          "p, s/m, md, p9, (lng*100)/m, m, md1, h, md2, k, span }'",
++	          "printf \"%%.2f %%.2f %%.2f %%.2f %%d %%d %%.2f %%d %%.2f %%d %%.2f %%.0f\", "
++	          "p, s/m, md, p9, (lng*100)/m, m, md1, h, md2, k, span, t[n] }'",
+@@ -3192,6 +3195,8 @@
+ 	double p = 0, a = 0, md = 0, p9 = 0, md1 = 0, md2 = 0, span = 0;
+ 	int gap = 0, n = 0, n1 = 0, n2 = 0;
+-	if ((sscanf (out, "%lf %lf %lf %lf %d %d %lf %d %lf %d %lf",
+-	             &p, &a, &md, &p9, &gap, &n, &md1, &n1, &md2, &n2, &span) != 11) ||
++	unsigned long long latest_ns = 0;
++	if ((sscanf (out, "%lf %lf %lf %lf %d %d %lf %d %lf %d %lf %llu",
++	             &p, &a, &md, &p9, &gap, &n, &md1, &n1, &md2, &n2, &span,
++	             &latest_ns) != 12) ||
+ 	    (a <= 0) || (md <= 0) || (p <= 0))
+ 		return false;
+@@ -3209,9 +3214,11 @@
+ 		halves->n2 = n2;
+ 		halves->span_ms = span;
+ 	}
++	if (last_present_ns)
++		*last_present_ns = latest_ns;
+ 
+ 	return true;
+ }
++
++/* Свежий timestamp отличает живую видеоподачу от старой истории latency:
++ * после паузы dumpsys всё ещё хранит прежние интервалы, но present timestamp
++ * последнего кадра уже не обновляется. */
++static bool atv14_layer_present_active (unsigned int max_age_ms)
++{
++	double p = 0.0, a = 0.0;
++	int n = 0;
++	unsigned long long last_ns = 0;
++	struct timespec ts;
++
++	if (!atv14_layer_stats (&p, &a, NULL, NULL, NULL, &n, 0, 150, NULL,
++	                        &last_ns) || (n < 2) || !last_ns)
++		return false;
++
++	if (clock_gettime (CLOCK_MONOTONIC, &ts) != 0)
++		return false;
++
++	unsigned long long now_ns = (unsigned long long) ts.tv_sec * 1000000000ULL +
++	                            (unsigned long long) ts.tv_nsec;
++	return fps_layer_present_recent (now_ns, last_ns, max_age_ms);
++}
+ 
+ /* Вердикт подачи видео-слоя: OK / неровная / вдвое реже. Разбор в
+@@ -3239,1 +3262,1 @@
+-	if (!atv14_layer_stats (&p, &a, &md, &p9, &gap, &n, expect_ms, ratio, NULL))
++	if (!atv14_layer_stats (&p, &a, &md, &p9, &gap, &n, expect_ms, ratio, NULL, NULL))
+@@ -3261,1 +3284,1 @@
+-	if (!atv14_layer_stats (&p, &a, NULL, NULL, NULL, &n, 0, 150, NULL))
++	if (!atv14_layer_stats (&p, &a, NULL, NULL, NULL, &n, 0, 150, NULL, NULL))
+@@ -3309,1 +3332,1 @@
+-	if (!atv14_layer_stats (&p, &a, &md, &p9, &gap, &n, expect_ms, 200, &hh))
++	if (!atv14_layer_stats (&p, &a, &md, &p9, &gap, &n, expect_ms, 200, &hh, NULL))
+@@ -4257,3 +4280,7 @@
+ 	/* когда в последний раз печатали «счётчик кадров стоит» (мкс) */
+ 	unsigned long long pause_log_us = 0;
++	/* Декодер может кратко исчезать из vdec_status при продолжающейся подаче.
++	 * На время свежих кадров SurfaceFlinger не считаем это концом видео. */
++	unsigned long long layer_stop_keep_until_us = 0;
++	unsigned long long layer_stop_log_us = 0;
+ 
+@@ -4935,1 +4962,5 @@
+ 		bool new_video = v0.active;
++		bool layer_stop_grace = !new_video && video && held &&
++		                        (now_us () < layer_stop_keep_until_us);
++		if (new_video)
++			layer_stop_keep_until_us = 0;
+ 
+@@ -4944,3 +4975,4 @@
+-		if (!new_video && g_switch_bump && (plat->sink != SINK_LEGACY) && video &&
++		if (!new_video && !layer_stop_grace && g_switch_bump &&
++		    (plat->sink != SINK_LEGACY) && video &&
+ 		    !ceiling_recent_within (CEILING_RESTART_WINDOW_US))
+ 			atv14_bump (plat, &orig_sf_id, &cur_sf_id, &want_sf_id, &held);
+@@ -4952,3 +4984,3 @@
+ 		bool lost_after_reset = !new_video &&
+ 		                        ceiling_recent_within (CEILING_RESTART_WINDOW_US);
+ 
+-		if ((new_video != video) && !lost_after_reset)
++		if ((new_video != video) && !lost_after_reset && !layer_stop_grace)
+@@ -4966,8 +4998,26 @@
+ 			/* дебаунс не должен сдвигать состояние выбора канала (R61) */
+ 			bool again_active = false;
+-			if (vdec_probe_active (plat->vdec_status, &again_active) == 0 &&
+-			    again_active == new_video)
++			int active_rc = vdec_probe_active (plat->vdec_status, &again_active);
++			bool layer_live = !new_video && video && held &&
++			                  (active_rc == 0) && !again_active &&
++			                  atv14_layer_present_active (750);
++
++			if (layer_live)
++			{
++				unsigned long long now = now_us ();
++				layer_stop_keep_until_us = now + 1000000ULL;
++				if (!layer_stop_log_us ||
++				    ((now - layer_stop_log_us) >= 10000000ULL))
++				{
++					layer_stop_log_us = now;
++					trace (1, "декодер временно не виден, но SurfaceFlinger "
++					       "продолжает получать кадры — ложный стоп игнорирую\n");
++				}
++			}
++			else if ((active_rc == 0) && (again_active == new_video))
+ 			{
+ 				video = new_video;
++				layer_stop_keep_until_us = 0;
+ 
+ 				/* Память о режиме, удержанном на паузе, относится к текущему
+--- /dev/null
++++ b/tests/test_fps_layer_present_recent.c
+@@ -0,0 +1,28 @@
++#include <assert.h>
++#include <stdio.h>
++#include "../fps_class.h"
++
++int main (void)
++{
++	const unsigned long long now = 10000000000ULL;
++
++	assert (fps_layer_present_recent (now, now, 750));
++	assert (fps_layer_present_recent (now, now - 750000000ULL, 750));
++	assert (fps_layer_present_recent (now, now - 749000000ULL, 750));
++	assert (!fps_layer_present_recent (now, now - 751000000ULL, 750));
++	assert (!fps_layer_present_recent (now, now + 1ULL, 750));
++	assert (!fps_layer_present_recent (now, 0, 750));
++	assert (!fps_layer_present_recent (0, now, 750));
++	assert (!fps_layer_present_recent (now, now, 0));
++
++	puts ("fps layer present freshness: OK");
++	return 0;
++}
+--- a/tests/run_tests.sh
++++ b/tests/run_tests.sh
+@@ -9,6 +9,7 @@
+ 	./out/host-tests/$name || status=1
+ }
+ run test_fps_class fps_class.c
++run test_fps_layer_present_recent fps_class.c
+ run test_fps_env fps_env.c fps_class.c
+ run test_sfmodes sfmodes.c
+ run test_dispmgr dispmgr.c

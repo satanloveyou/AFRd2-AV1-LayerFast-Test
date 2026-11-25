@@ -10,6 +10,7 @@ on:
       - "patches/04-log-suppression.patch"
       - "patches/05-android10-11-vendor-backend.patch"
       - "patches/06-counter-reset-and-24-25-guard.patch"
+      - "patches/07-live-layer-stop-guard.patch"
       - "packaging/**"
       - "README.md"
 
@@ -63,6 +64,8 @@ jobs:
           patch --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/05-android10-11-vendor-backend.patch"
           patch --dry-run --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/06-counter-reset-and-24-25-guard.patch"
           patch --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/06-counter-reset-and-24-25-guard.patch"
+          patch --dry-run --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/07-live-layer-stop-guard.patch"
+          patch --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/07-live-layer-stop-guard.patch"
 
       - name: Host syntax check and tests
         working-directory: upstream
