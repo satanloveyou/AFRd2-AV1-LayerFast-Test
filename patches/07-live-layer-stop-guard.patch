@@ -10,7 +10,7 @@ index 4b60704..226ed66 100644
  
  #ifndef SOCK_CLOEXEC
  #  define SOCK_CLOEXEC O_CLOEXEC
-@@ -3194,7 +3195,8 @@ typedef struct
+@@ -3194,6 +3195,7 @@ typedef struct
  static bool atv14_layer_stats (double *period_ms, double *avg_ms, double *median_ms,
                                 double *p90_ms, double *gap_pct, int *count,
 -                               int expect_ms, int ratio_pct, layer_halves_t *halves)
@@ -188,7 +188,7 @@ index 4b60704..226ed66 100644
  		{
  			/* Остановку ждём с проверкой «видео вернулось»: на IPTV канал
  			 * открывается 5-10 с, и окно остановки бывает длинным (§92). */
-@@ -5089,10 +5152,27 @@ static int run_atv14 (const platform_t *plat)
+@@ -5089,9 +5152,26 @@ static int run_atv14 (const platform_t *plat)
  
  			/* дебаунс не должен сдвигать состояние выбора канала (R61) */
  			bool again_active = false;
