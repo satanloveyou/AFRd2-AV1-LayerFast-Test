@@ -1,206 +1,137 @@
-diff --git a/vdec.h b/vdec.h
---- a/vdec.h
-+++ b/vdec.h
-@@ -85,7 +85,12 @@ int vdec_read (const char *path, vdec_status_t *out, vdec_sel_t *st);
- /* Быстрая проверка «есть ли хоть один канал» без изменения состояния выбора
-  * (нужна для подтверждения старта/стопа в дебаунсе). */
- int vdec_probe_active (const char *path, bool *active);
+--- a/fps_class.h
++++ b/fps_class.h
+@@ -281,6 +281,15 @@
+  * 24 и 30 — разные. Слева ноль означает «сравнивать нечего» -> false. */
+ bool fps_group_differs (int a_hz, int b_hz);
  
-+/* Два активных снимка относятся к одной сигнатуре декодера. Счётчик кадров
-+ * и status намеренно не сравниваются: они могут сбрасываться/меняться при
-+ * перезапуске счётчика или паузе, не означая смену видеопотока. */
-+bool vdec_same_signature (const vdec_status_t *a, const vdec_status_t *b);
++/* Защита от обратной связи декодера с текущим режимом дисплея.
++ * Когда экран уже работает на 24/25 Гц, счётчик может повторять частоту
++ * экрана, а не контента. Без независимого подтверждения не переключаемся
++ * между 24 и 25: удерживаем текущий режим. */
++int fps_guard_display_feedback (int measured_hz, int display_hz,
++                                int declared_hz, bool api_hint,
++                                bool layer_pinned);
 +
- /* CLOCK_MONOTONIC в микросекундах. */
- unsigned long long now_us (void);
- 
-diff --git a/vdec.c b/vdec.c
---- a/vdec.c
-+++ b/vdec.c
-@@ -220,6 +220,14 @@ int vdec_read (const char *path, vdec_status_t *out, vdec_sel_t *st)
- 	return 0;
++
+ int fps_rate_hz (int index);
+ const char *fps_rate_name (int index);
+ int fps_rate_index_for_hz (int hz);
+--- a/fps_class.c
++++ b/fps_class.c
+@@ -558,6 +558,32 @@
+ 	return ga != gb;
  }
  
-+bool vdec_same_signature (const vdec_status_t *a, const vdec_status_t *b)
++/* На 24/25 Гц счётчик декодера иногда синхронизируется с экраном.
++ * Такое измерение не доказывает смену контента: без свежей подсказки API,
++ * закреплённой частоты слоя или совпадающей декларации держим текущий режим.
++ * Вне спорной зоны (или при дисплее 50/60 Гц) обычное решение не меняем. */
++int fps_guard_display_feedback (int measured_hz, int display_hz,
++                                int declared_hz, bool api_hint,
++                                bool layer_pinned)
 +{
-+	return a && b && a->active && b->active &&
-+	       (strcmp (a->device, b->device) == 0) &&
-+	       (a->decl_dur == b->decl_dur) &&
-+	       (a->decl_fps == b->decl_fps);
++	if (api_hint || layer_pinned ||
++	    (measured_hz <= 0) || (display_hz <= 0))
++		return measured_hz;
++
++	if ((measured_hz < 23 * 256) || (measured_hz > 27 * 256) ||
++	    (display_hz < 23 * 256) || (display_hz > 27 * 256))
++		return measured_hz;
++
++	if (!fps_group_differs (display_hz, measured_hz))
++		return measured_hz;
++
++	/* Совпадающая декларация подтверждает измерение независимо от дисплея. */
++	if ((declared_hz > 0) && !fps_group_differs (declared_hz, measured_hz))
++		return measured_hz;
++
++	return display_hz;
 +}
 +
- int vdec_probe_active (const char *path, bool *active)
- {
- 	char *text = read_file (path);
-diff --git a/tests/test_vdec.c b/tests/test_vdec.c
---- a/tests/test_vdec.c
-+++ b/tests/test_vdec.c
-@@ -151,5 +151,31 @@ int main (void)
- 	assert (st.decl_fps == 30);		/* заявленная частота выбранного канала */
- 
-+	/* Смена счётчика/status сама по себе не означает новый поток.
-+	 * Сигнатура учитывает устройство и декларацию частоты, но не динамические
-+	 * поля счётчика и status (проверка для перезапуска счётчика на том же ролике). */
-+	{
-+		vdec_status_t a, b;
-+		memset (&a, 0, sizeof (a));
-+		memset (&b, 0, sizeof (b));
-+		a.active = b.active = true;
-+		snprintf (a.device, sizeof (a.device), "%s", "amvdec_vp9_v4l");
-+		snprintf (b.device, sizeof (b.device), "%s", "amvdec_vp9_v4l");
-+		a.decl_dur = b.decl_dur = 3200;
-+		a.decl_fps = b.decl_fps = 30;
-+		a.frames = 9000;
-+		b.frames = 12;
-+		a.status = 53;
-+		b.status = 5;
-+		assert (vdec_same_signature (&a, &b));
-+		b.decl_dur = 4004;
-+		assert (!vdec_same_signature (&a, &b));
-+		b.decl_dur = 3200;
-+		snprintf (b.device, sizeof (b.device), "%s", "amvdec_av1_v4l");
-+		assert (!vdec_same_signature (&a, &b));
-+		b.active = false;
-+		assert (!vdec_same_signature (&a, &b));
-+	}
-+
- 	memset (&sel, 0, sizeof (sel));
- 	assert (vdec_read ("tests/fixtures/vdec_status_idle.txt", &st, &sel) == 0);
- 	assert (!st.active);
-diff --git a/afrd.c b/afrd.c
+ /* Вердикт подачи видео-слоя (см. fps_class.h). */
+ int fps_cadence_verdict (int median_ms, int period_ms, int expect_ms,
+                          int gap_pct, int gap_thr)
 --- a/afrd.c
 +++ b/afrd.c
-@@ -4228,6 +4228,8 @@ static int run_atv14 (const platform_t *plat)
- 	bool held = false;
- 	bool video = false;
- 	vdec_status_t v0;
- 	/* R61: состояние выбора канала vdec_status (растущий счётчик) */
-+	vdec_status_t prev_vdec_signature = { 0 };
-+	bool have_prev_vdec_signature = false;
- 	vdec_sel_t vdec_sel = { 0 };
- 	int retries = 0;
-@@ -4931,4 +4933,16 @@ static int run_atv14 (const platform_t *plat)
- 		}
- 		vdec_fails = 0;
- 
-+		/* Запоминаем стабильную сигнатуру декодера. Сброс frame count и
-+		 * изменение status не должны превращать тот же поток в «новое видео». */
-+		bool same_vdec_signature = have_prev_vdec_signature &&
-+		                           vdec_same_signature (&v0, &prev_vdec_signature);
-+		if (v0.active)
-+		{
-+			prev_vdec_signature = v0;
-+			have_prev_vdec_signature = true;
-+		}
-+		else
-+			have_prev_vdec_signature = false;
-+
- 		bool new_video = v0.active;
-@@ -5052,22 +5066,34 @@ static int run_atv14 (const platform_t *plat)
- 				bool own_reset = ceiling_take_restart (cur_sf_id) ||
- 				                 ceiling_recent_within (8000000ULL) ||
- 				                 own_switch_recent (cur_sf_id);
-+				bool keep_layer_pin = same_vdec_signature &&
-+				                      (layer_rate_pin > 0) &&
-+				                      (g_content_hz > 0) &&
-+				                      !fps_group_differs (g_content_hz, layer_rate_pin);
-+				bool preserve_video_state = own_reset || keep_layer_pin;
- 
- 				/* Сеанс «по кнопке» на смене потока заканчивается: новое
- 				 * видео — это новый замер, то есть второе переключение,
- 				 * которого в сеансе быть не должно. */
--				if (!own_reset && burst_running (&g_burst))
-+				if (!preserve_video_state && burst_running (&g_burst))
- 					g_burst_video_changed = true;
- 
--				trace (1, own_reset
--				       ? "счётчик кадров сброшен нашей сменой плотности — мерю заново\n"
--				       : "счётчик кадров сброшен — новое видео, мерю заново\n");
-+				if (keep_layer_pin)
-+					trace (1, "счётчик кадров перезапущен при прежней сигнатуре "
-+					       "декодера (%s, frame dur %u, заявлено %u fps) — "
-+					       "сохраняю закрепление слоя " HZ_FMT "\n",
-+					       v0.device, v0.decl_dur, v0.decl_fps,
-+					       HZ_ARGS (layer_rate_pin));
-+				else
-+					trace (1, own_reset
-+					       ? "счётчик кадров сброшен нашей сменой плотности — мерю заново\n"
-+					       : "счётчик кадров сброшен — новое видео, мерю заново\n");
- 
- 				/* Следующий ролик в том же плеере начинается с перезапуска
- 				 * декодера, а не с паузы: поднимаем режим до максимума и
- 				 * здесь, иначе он унаследует низкий «потолок» предыдущего
- 				 * ролика (журнал §47.6). */
--				if (!own_reset)
-+				if (!preserve_video_state)
- 				{
- 					atv14_bump (plat, &orig_sf_id, &cur_sf_id, &want_sf_id, &held);
- 					ceiling_forget ();
-@@ -5082,7 +5102,7 @@ static int run_atv14 (const platform_t *plat)
- 				 * декодера после собственного переключения — не новое видео
- 				 * (иначе цикл «сдали → через 6 с снова пробуем», лог
- 				 * тестера 03.11: 18 переключений за 6.5 мин). */
--				if (!own_reset)
-+				if (!preserve_video_state)
- 				{
- 					seq_new_video (&seq);
- 					/* Сверка источников относится к текущему видео: у нового
-@@ -5230,4 +5230,7 @@ static int run_atv14 (const platform_t *plat)
--				layer_rate_checked = false;
--				layer_rate_pin = 0;
--				layer_transitions = 0;
-+				layer_rate_checked = keep_layer_pin;
-+				if (!keep_layer_pin)
-+				{
-+					layer_rate_pin = 0;
-+					layer_transitions = 0;
-+				}
- 				counter_restart_log_us = 0;
-@@ -5133,8 +5159,8 @@ static int run_atv14 (const platform_t *plat)
- 				 * перезапуск декодера после собственного переключения (2–9 с,
- 				 * здесь бывало и 0.3 с) иначе отменял сверку, и «принял ли
- 				 * ядро режим» не проверялось вовсе — ровно тот случай, ради
- 				 * которого сверка и делалась. */
--				if (!own_reset)
-+				if (!preserve_video_state)
- 				{
- 					hdrinfo_armed = false;
- 					mstime_disable (&hdrinfo_timer);
-@@ -6419,6 +6445,37 @@ static int run_atv14 (const platform_t *plat)
+@@ -6654,6 +6654,30 @@
  					hz = layer_rate_pin;
  				}
  
-+				/* На 24/25 Гц подача SurfaceFlinger синхронизируется с экраном.
-+				 * Если нет закреплённой независимой частоты или свежей подсказки
-+				 * плеера, замер 23..27 Гц, расходящийся с текущим режимом, нельзя
-+				 * считать доказательством смены контента: это и создавало петлю
-+				 * 24 <-> 25 после сброса счётчика. Разрешаем смену только когда
-+				 * frame dur / frame rate независимо подтверждают измеренное значение. */
-+				if (!api_hz && !layer_rate_pin &&
-+				    (hz >= (23 * 256)) && (hz <= (27 * 256)))
++				/* На текущих 24/25 Гц счётчик может принять частоту экрана за
++				 * частоту контента. Без независимого подтверждения не дёргаем
++				 * дисплей между соседними режимами. */
++				if (cur_sf_id >= 0)
 +				{
-+					int display_hz = (cur_sf_id >= 0)
-+					                 ? atv14_mode_hz (plat, cur_sf_id) : 0;
++					int display_hz = atv14_mode_hz (plat, cur_sf_id);
 +					int declared_hz = decl_hz_from_dur (v0.decl_dur);
 +					if (!declared_hz && (v0.decl_fps > 0))
 +						declared_hz = (int) v0.decl_fps * 256;
 +
-+					bool declared_matches = (declared_hz > 0) &&
-+					                        !fps_group_differs (declared_hz, hz);
-+					if ((display_hz >= (23 * 256)) &&
-+					    (display_hz <= (27 * 256)) &&
-+					    fps_group_differs (display_hz, hz) &&
-+					    !declared_matches)
++					int guarded_hz = fps_guard_display_feedback (
++						hz, display_hz, declared_hz, api_hz > 0,
++						layer_rate_pin > 0);
++					if (guarded_hz != hz)
 +					{
 +						trace (1, "замер " HZ_FMT " Гц не подтверждён "
 +						       "независимым источником при текущем режиме "
 +						       HZ_FMT " Гц — удерживаю режим, чтобы не "
 +						       "переключаться 24/25 Гц\n",
 +						       HZ_ARGS (hz), HZ_ARGS (display_hz));
-+						hz = display_hz;
++						hz = guarded_hz;
 +					}
 +				}
 +
  				/* Решение печатаем один раз: политика точности перещёлкивает
  				 * 23.98/24.00, и сравнение с g_dec_last_hz давало строку каждые
- 				 * 14 с на одном ролике.
+ 				 * 14 с на одном ролике (лог тестера 03.11). */
+--- /dev/null
++++ b/tests/test_fps_display_guard.c
+@@ -0,0 +1,37 @@
++#include <assert.h>
++#include <stdio.h>
++#include "../fps_class.h"
++
++int main (void)
++{
++	const int hz24 = fps_rate_hz (1);
++	const int hz25 = fps_rate_hz (2);
++	const int hz60 = fps_rate_hz (7);
++	const int hz30 = fps_rate_hz (4);
++
++	/* Без независимой опоры не переключаем 24/25 вслед за дисплеем. */
++	assert (fps_guard_display_feedback (hz24, hz25, hz30, false, false) == hz25);
++	assert (fps_guard_display_feedback (hz25, hz24, hz30, false, false) == hz24);
++
++	/* Декларация того же класса подтверждает измерение. */
++	assert (fps_guard_display_feedback (hz24, hz25, hz24, false, false) == hz24);
++	assert (fps_guard_display_feedback (hz25, hz24, hz25, false, false) == hz25);
++
++	/* Свежая подсказка API и закреплённая частота слоя сильнее guard. */
++	assert (fps_guard_display_feedback (hz24, hz25, hz30, true, false) == hz24);
++	assert (fps_guard_display_feedback (hz25, hz24, hz30, false, true) == hz25);
++
++	/* За пределами 24/25 Гц обычный AFR не ограничивается. */
++	assert (fps_guard_display_feedback (hz24, hz60, hz30, false, false) == hz24);
++	assert (fps_guard_display_feedback (hz60, hz25, hz30, false, false) == hz60);
++
++	/* 23.976 и 24 входят в одну группу: это не повод удерживать режим. */
++	assert (fps_guard_display_feedback (fps_rate_hz (0), hz24, hz30,
++	                                    false, false) == fps_rate_hz (0));
++
++	/* Нулевые/неизвестные значения не должны создавать режим. */
++	assert (fps_guard_display_feedback (hz24, 0, 0, false, false) == hz24);
++
++	puts ("fps display feedback guard: OK");
++	return 0;
++}
+--- a/tests/run_tests.sh
++++ b/tests/run_tests.sh
+@@ -11,6 +11,7 @@
+ 	./out/host-tests/$name || status=1
+ }
+ run test_fps_class fps_class.c
++run test_fps_display_guard fps_class.c
+ run test_fps_env fps_env.c fps_class.c
+ run test_sfmodes sfmodes.c
+ run test_dispmgr dispmgr.c
+
